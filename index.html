@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planetary Correlations</title>
+<meta name="description" content="Correlate confirmed exoplanet and host-star attributes from the NASA Exoplanet Archive, with planet occurrence stats against the Gaia DR3 solar neighbourhood.">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+</head>
+<body>
+<header class="wrap">
+  <h1>Planetary Correlations</h1>
+  <p class="lede">Pick any two attributes of the <span id="n-planets">…</span> confirmed exoplanets in the NASA Exoplanet Archive and see how they relate. Below the chart, the known planets are set against Gaia DR3's census of nearby stars.</p>
+</header>
+
+<main class="wrap">
+  <section class="card" aria-labelledby="explorer-h">
+    <h2 id="explorer-h" class="sr-only">Correlation explorer</h2>
+    <div class="controls">
+      <label>X axis <select id="x"></select></label>
+      <label class="chk"><input type="checkbox" id="xlog"> log</label>
+      <label>Y axis <select id="y"></select></label>
+      <label class="chk"><input type="checkbox" id="ylog"> log</label>
+      <label>Color by <select id="color"></select></label>
+      <button id="swap" type="button" title="Swap X and Y">⇄ Swap</button>
+    </div>
+    <div class="controls secondary">
+      <span class="ctl-label">Star types:</span>
+      <span id="class-filter" class="chips"></span>
+      <label class="chk"><input type="checkbox" id="trend" checked> trend line</label>
+      <label class="chk"><input type="checkbox" id="solar" checked> Solar System</label>
+      <label class="chk" id="rownorm-wrap" hidden><input type="checkbox" id="rownorm" checked> % per row</label>
+    </div>
+    <div id="presets" class="presets"></div>
+    <div id="plot" class="plot" role="img" aria-label="Chart of the selected attributes"></div>
+    <div id="corr" class="corr" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-labelledby="gaia-h">
+    <h2 id="gaia-h">How common are planets around nearby stars?</h2>
+    <p class="note">Denominator: Gaia DR3 main-sequence stars with good parallaxes (parallax/error &gt; 10), classed by BP−RP colour. Numerator: those same stars that host at least one confirmed planet with the property you pick.</p>
+    <div class="question">
+      Of Gaia DR3
+      <select id="q-class"></select>
+      dwarf stars within
+      <select id="q-dist"></select>,
+      what share host
+      <select id="q-crit"></select>?
+    </div>
+    <p id="q-answer" class="answer" aria-live="polite"></p>
+    <div id="gaia-plot" class="plot plot-sm" role="img" aria-label="Share of Gaia stars per spectral class meeting the chosen criterion"></div>
+    <div class="table-wrap"><table id="gaia-table"></table></div>
+  </section>
+
+  <section class="card" aria-labelledby="hosts-h">
+    <h2 id="hosts-h">What kinds of systems does each star type have?</h2>
+    <p class="note">All known host stars in the archive, grouped by effective temperature. These are shares of <em>known</em> planets, so they mostly show what each survey method can find.</p>
+    <div id="tiles" class="tiles"></div>
+    <div class="two-up">
+      <div id="mix-plot" class="plot plot-sm" role="img" aria-label="Planet type mix by star type"></div>
+      <div id="mult-plot" class="plot plot-sm" role="img" aria-label="Number of known planets per system by star type"></div>
+    </div>
+  </section>
+
+  <section class="card caveats">
+    <h2>Read with care</h2>
+    <ul>
+      <li><strong>Selection bias.</strong> These are known planets, not all planets. Transit surveys favour big planets on short orbits, radial-velocity surveys favour massive ones, and most host stars were never searched thoroughly. A low percentage usually means "not looked for hard enough" rather than "rare".</li>
+      <li><strong>Estimated values.</strong> The archive's composite table fills in missing radius or mass with a mass–radius relation, so planet types for planets known only by mass (or only by radius) are approximate.</li>
+      <li><strong>Spectral classes.</strong> On this page, star types come from colour (Gaia BP−RP) in the Gaia section and from effective temperature in the archive sections. Neither is a spectroscopic classification. The main-sequence cut uses a simple colour–magnitude band, so some subgiants and unresolved binaries leak in.</li>
+      <li><strong>Planet types</strong> by radius: Earth-size &lt; 1.25 R⊕, super-Earth 1.25–2, sub-Neptune 2–4, Neptune-like 4–8, gas giant ≥ 8. Hot Jupiter: radius ≥ 8 R⊕ and period &lt; 10 days. Temperate: radius &lt; 2 R⊕ and 0.35–1.75 × Earth's insolation.</li>
+    </ul>
+    <p class="note" id="sources"></p>
+  </section>
+</main>
+
+<div id="loading" class="loading">Loading data…</div>
+<script src="app.js"></script>
+</body>
+</html>
