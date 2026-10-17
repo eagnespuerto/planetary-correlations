@@ -24,6 +24,8 @@ Below the chart, the known planets are compared with the **Gaia DR3** census of 
 python scripts/fetch_data.py
 ```
 
+A GitHub Actions workflow (`.github/workflows/refresh-data.yml`) runs this on the 1st and 15th of each month. When the data has changed, it opens a pull request. You can also start it by hand from the Actions tab.
+
 ## Run locally
 
 The page loads JSON with `fetch`, so open it over HTTP instead of `file://`:

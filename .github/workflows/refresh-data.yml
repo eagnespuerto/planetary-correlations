@@ -1,0 +1,77 @@
+name: Refresh data
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st and 15th of every month
+    - cron: "0 6 1,15 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Keep current data for comparison
+        run: cp -r data "$RUNNER_TEMP/old-data"
+
+      - name: Fetch NASA Exoplanet Archive and Gaia DR3 data
+        run: python scripts/fetch_data.py
+
+      - name: Compare with current data
+        id: diff
+        run: |
+          python - "$RUNNER_TEMP/old-data" data >> "$GITHUB_OUTPUT" <<'EOF'
+          import json, sys
+          from pathlib import Path
+          old, new = Path(sys.argv[1]), Path(sys.argv[2])
+          def load(d, name):
+              j = json.loads((d / name).read_text())
+              j.pop("meta", None)  # the fetch date changes on every run
+              return j
+          changed = any(load(old, n) != load(new, n) for n in ("planets.json", "census.json"))
+          po = len(load(old, "planets.json")["cols"]["pl_name"])
+          pn = len(load(new, "planets.json")["cols"]["pl_name"])
+          print(f"changed={'true' if changed else 'false'}")
+          print(f"old_count={po}")
+          print(f"new_count={pn}")
+          EOF
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD: ${{ steps.diff.outputs.old_count }}
+          NEW: ${{ steps.diff.outputs.new_count }}
+        run: |
+          branch="data-refresh/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add data
+          git commit -m "Refresh exoplanet and Gaia data ($(date -u +%Y-%m-%d))"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "Data refresh $(date -u +%Y-%m-%d)" \
+            --body "Scheduled refresh of \`data/\` from the NASA Exoplanet Archive and Gaia DR3.
+
+          Confirmed planets: ${OLD} → ${NEW}.
+
+          Merging redeploys GitHub Pages with the new data."
+
+      - name: No changes
+        if: steps.diff.outputs.changed != 'true'
+        run: echo "Data unchanged since the last refresh; no pull request opened."
