@@ -2,9 +2,11 @@
 
 A static page for exploring the confirmed exoplanets in the [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/). Pick any two attributes to plot against each other (semi-major axis, period, radius, mass, density, eccentricity, insolation, star type, star mass, metallicity, distance, number of planets, discovery method and more). The page shows the correlation, a trend line and Solar System reference points.
 
-Below the chart, the known planets are compared with the **Gaia DR3** census of nearby main-sequence stars, which answers questions like:
+Below the chart, the known planets are compared with the **Gaia DR3** census of stars and white dwarfs, split into main-sequence, evolved (non-main-sequence) and remnant objects. It answers questions like:
 
-> Of Gaia DR3 K-type dwarfs within 50 pc, what share host a known sub-Neptune? Or 3 or more known planets?
+> Of Gaia DR3 K-type main-sequence stars within 50 pc, what share host a known sub-Neptune? Of all stellar remnants across the whole Milky Way, how many host 2 or more planets?
+
+That section can show bars by spectral class (as a share, # of host stars or # of Gaia objects), or a probability distribution over Gaia colour comparing the stars with the planet hosts. Pie charts underneath break the stars and hosts down by class and by stage.
 
 ## How the views work
 
@@ -18,7 +20,9 @@ Below the chart, the known planets are compared with the **Gaia DR3** census of 
 `scripts/fetch_data.py` (Python 3 standard library only) refreshes the two files in `data/`:
 
 - `planets.json` is the archive's `pscomppars` table (one row per planet, composite parameters).
-- `census.json` holds Gaia DR3 counts of main-sequence stars within 25, 50 and 100 pc (parallax/error > 10, two-segment colour–magnitude band), in 0.05 mag BP−RP bins, plus the Gaia colour and parallax of every known host that passes the same cuts.
+- `census.json` holds Gaia DR3 counts in 0.05 mag BP−RP bins within 25, 50 and 100 pc and across all of Gaia DR3 ("whole Milky Way"). Every count requires parallax/error > 10, and each one is split by position on the colour–magnitude diagram into main sequence, evolved and remnant (white dwarf). The file also holds the Gaia colour, parallax and stage of every known host with a Gaia DR3 ID.
+
+Gaia DR3 is a fixed release, so the star counts are cached in `census.json` under a fingerprint of the cuts. A refresh only re-queries the planets and hosts unless the cuts change. A full re-query of the whole-galaxy counts runs as asynchronous Gaia jobs that scan the entire catalogue, which can take some time.
 
 ```bash
 python scripts/fetch_data.py

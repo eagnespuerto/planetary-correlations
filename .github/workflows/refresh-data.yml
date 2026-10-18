@@ -17,7 +17,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Gaia star counts are cached in data/census.json; a full re-query (only when the cuts
+    # change) scans all of Gaia DR3 and can take a while.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
