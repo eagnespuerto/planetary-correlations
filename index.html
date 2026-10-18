@@ -39,17 +39,31 @@
 
   <section class="card" aria-labelledby="gaia-h">
     <h2 id="gaia-h">How common are planets around nearby stars?</h2>
-    <p class="note">Denominator: Gaia DR3 main-sequence stars with good parallaxes (parallax/error &gt; 10), classed by BP−RP colour. Numerator: those same stars that host at least one confirmed planet with the property you pick.</p>
+    <p class="note">Denominator: Gaia DR3 stars and white dwarfs with good parallaxes (parallax/error &gt; 10), split by their place on the colour–magnitude diagram (main sequence, evolved, or remnant) and classed by BP−RP colour. Numerator: those same objects that host at least one confirmed planet with the property you pick.</p>
     <div class="question">
       Of Gaia DR3
-      <select id="q-class"></select>
-      dwarf stars within
-      <select id="q-dist"></select>,
+      <select id="q-class" aria-label="Spectral class"></select>
+      <select id="q-pop" aria-label="Population"></select>
+      <select id="q-dist" aria-label="Distance limit"></select>,
       what share host
-      <select id="q-crit"></select>?
+      <select id="q-crit" aria-label="Planet criterion"></select>?
     </div>
     <p id="q-answer" class="answer" aria-live="polite"></p>
-    <div id="gaia-plot" class="plot plot-sm" role="img" aria-label="Share of Gaia stars per spectral class meeting the chosen criterion"></div>
+    <div class="controls secondary">
+      <label>Chart <select id="g-mode">
+        <option value="bars">By spectral class</option>
+        <option value="dist">Probability distribution</option>
+      </select></label>
+      <label>Y axis <select id="g-y"></select></label>
+    </div>
+    <div id="gaia-plot" class="plot plot-md" role="img" aria-label="Gaia stars and planet hosts by spectral class or colour"></div>
+    <p class="note" id="pies-note"></p>
+    <div class="pies">
+      <div id="pie-1" class="pie" role="img" aria-label="Gaia stars by class"></div>
+      <div id="pie-2" class="pie" role="img" aria-label="Planet hosts by class"></div>
+      <div id="pie-3" class="pie" role="img" aria-label="Gaia stars by evolutionary stage"></div>
+      <div id="pie-4" class="pie" role="img" aria-label="Planet hosts by evolutionary stage"></div>
+    </div>
     <div class="table-wrap"><table id="gaia-table"></table></div>
   </section>
 
@@ -68,7 +82,8 @@
     <ul>
       <li><strong>Selection bias.</strong> These are known planets, not all planets. Transit surveys favour big planets on short orbits, radial-velocity surveys favour massive ones, and most host stars were never searched thoroughly. A low percentage usually means "not looked for hard enough" rather than "rare".</li>
       <li><strong>Estimated values.</strong> The archive's composite table fills in missing radius or mass with a mass–radius relation, so planet types for planets known only by mass (or only by radius) are approximate.</li>
-      <li><strong>Spectral classes.</strong> On this page, star types come from colour (Gaia BP−RP) in the Gaia section and from effective temperature in the archive sections. Neither is a spectroscopic classification. The main-sequence cut uses a simple colour–magnitude band, so some subgiants and unresolved binaries leak in.</li>
+      <li><strong>Spectral classes.</strong> On this page, star types come from colour (Gaia BP−RP) in the Gaia section and from effective temperature in the archive sections. Neither is a spectroscopic classification. For white dwarfs the colour class only describes their colour, not a spectral type.</li>
+      <li><strong>Evolutionary stage</strong> comes from position on the Gaia colour–magnitude diagram. <em>Main sequence</em>: within a band around the dwarf sequence, so some subgiants and unresolved binaries leak in. <em>Evolved</em> (non-main-sequence): brighter than that band (subgiants, giants), plus blue hot subdwarfs. <em>Remnant</em>: the white-dwarf sequence, with a photometric-quality cut. <em>Whole Milky Way</em> means every Gaia DR3 source with a good parallax: about 100 million objects, mostly within a few thousand parsecs. That is roughly 0.1% of the Galaxy's stars, and at large distances it is biased toward bright ones. Colours are not corrected for interstellar dust, which reddens distant stars and pushes them toward cooler classes. Neutron stars and black holes are not in the Gaia counts, but pulsar hosts are labelled remnants in the "Star stage" attribute above. Hosts without good Gaia data are staged from log g instead.</li>
       <li><strong>Planet types</strong> by radius: Earth-size &lt; 1.25 R⊕, super-Earth 1.25–2, sub-Neptune 2–4, Neptune-like 4–8, gas giant ≥ 8. Hot Jupiter: radius ≥ 8 R⊕ and period &lt; 10 days. Temperate: radius &lt; 2 R⊕ and 0.35–1.75 × Earth's insolation.</li>
     </ul>
     <p class="note" id="sources"></p>

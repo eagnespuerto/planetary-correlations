@@ -6,6 +6,18 @@ const CLASS_ORDER = ['O/B', 'A', 'F', 'G', 'K', 'M', 'Brown dwarf'];
 const GAIA_CLASSES = ['O/B', 'A', 'F', 'G', 'K', 'M'];
 const PTYPES = ['Earth-size', 'Super-Earth', 'Sub-Neptune', 'Neptune-like', 'Gas giant'];
 const MULT_ORDER = ['1', '2', '3', '4', '5+'];
+const STAGES = ['ms', 'evolved', 'remnant'];
+const STAGE_LABEL = { ms: 'Main sequence', evolved: 'Evolved', remnant: 'Remnant' };
+const STAGE_ORDER = STAGES.map(k => STAGE_LABEL[k]);
+const STAGE_VAR = { ms: '--st-ms', evolved: '--st-evolved', remnant: '--st-remnant' };
+// Population choices for the Gaia section: one stage, or all of them.
+const POPS = {
+  ms: { label: 'main-sequence stars', stages: ['ms'] },
+  evolved: { label: 'non-main-sequence stars', stages: ['evolved'] },
+  remnant: { label: 'stellar remnants', stages: ['remnant'] },
+  all: { label: 'stars or remnants', stages: STAGES },
+};
+const CLASS_EDGES = [0, 0.40, 0.75, 1.00, 1.85]; // BP-RP boundaries between GAIA_CLASSES
 
 // Effective temperature -> class (after Pecaut & Mamajek dwarf sequence).
 function teffClass(t) {
@@ -36,6 +48,18 @@ function planetType(r) {
   return 'Gas giant';
 }
 const multBucket = n => n == null ? null : (n >= 5 ? '5+' : String(n));
+// Host stage: Gaia CMD position when the host passes the census quality cut, else a fallback
+// from surface gravity (white dwarfs log g >= 7, giants < 3.5, hot subdwarfs 5-7 at > 15000 K).
+function hostStage(row, gaia) {
+  const g = gaia && gaia[2];
+  if (g) return STAGE_LABEL[g];
+  if (/^PSR/.test(row.hostname)) return 'Remnant';
+  const lg = row.st_logg;
+  if (lg == null) return null;
+  if (lg >= 7) return 'Remnant';
+  if (lg < 3.5 || (lg >= 5 && row.st_teff > 15000)) return 'Evolved';
+  return 'Main sequence';
+}
 
 // ---------- attributes ----------
 const ATTRS = {
@@ -58,6 +82,7 @@ const ATTRS = {
   sy_snum: { label: 'Stars in system', unit: '' },
   disc_year: { label: 'Discovery year', unit: '' },
   star_class: { label: 'Star type (from Teff)', cat: true, order: CLASS_ORDER },
+  star_stage: { label: 'Star stage (main sequence / evolved / remnant)', cat: true, order: STAGE_ORDER },
   planet_type: { label: 'Planet type (from radius)', cat: true, order: PTYPES },
   multiplicity: { label: 'Planets in system (grouped)', cat: true, order: MULT_ORDER },
   discoverymethod: { label: 'Discovery method', cat: true, order: null },
@@ -98,7 +123,8 @@ let CENSUS = null;
 const state = {
   x: 'pl_bmasse', y: 'pl_rade', color: 'planet_type', xlog: true, ylog: true,
   classes: new Set(CLASS_ORDER.concat(['Unknown'])), trend: true, solar: true, rownorm: true,
-  qClass: 'G', qDist: '100', qCrit: 'any',
+  qClass: 'G', qPop: 'ms', qDist: '100', qCrit: 'any',
+  gMode: 'bars', gY: { bars: 'pct', dist: 'prob' },
 };
 
 const $ = id => document.getElementById(id);
@@ -131,6 +157,7 @@ async function load() {
   ATTRS.discoverymethod.order = top.concat('Other');
 
   CENSUS = c;
+  PLANETS.forEach(r => { r.star_stage = hostStage(r, r.gaia_dr3_id && c.hosts[r.gaia_dr3_id]); });
   $('n-planets').textContent = n.toLocaleString();
   $('sources').textContent = `Data: ${p.meta.sources.join('; ')}. Fetched ${p.meta.fetched}.`;
 }
@@ -354,62 +381,217 @@ const CRITERIA = [
   ['n4', '4 or more known planets', ps => ps.length >= 4],
 ];
 const CRIT_SHORT = { any: 'Any planet', hotjup: 'Hot Jupiter', temperate: 'Temperate', n2: '≥2 planets', n3: '≥3 planets', n4: '≥4 planets' };
+const critShort = k => CRIT_SHORT[k] || k.slice(5);
 
-let HOSTS = []; // [{cls, plx, planets[]}]
+const GAIA_Y = {
+  bars: [['pct', '% of stars that host it'], ['hosts', '# of host stars'], ['stars', '# of Gaia stars']],
+  dist: [['prob', 'Probability per 0.1 mag'], ['cdf', 'Cumulative probability']],
+};
+function syncGaiaY() {
+  fillSelect($('g-y'), GAIA_Y[state.gMode], state.gY[state.gMode]);
+  $('g-mode').value = state.gMode;
+}
+
+let HOSTS = []; // hosts with a Gaia CMD stage: [{cls, bprp, plx, stage, planets[]}]
 function buildHosts() {
   const byId = {};
   PLANETS.forEach(p => { if (p.gaia_dr3_id) (byId[p.gaia_dr3_id] = byId[p.gaia_dr3_id] || []).push(p); });
-  HOSTS = Object.entries(CENSUS.hosts).filter(([id]) => byId[id])
-    .map(([id, [bprp, plx]]) => ({ cls: colorClass(bprp), plx, planets: byId[id] }));
+  HOSTS = Object.entries(CENSUS.hosts).filter(([id, h]) => byId[id] && h[2])
+    .map(([id, [bprp, plx, stage]]) => ({ cls: colorClass(bprp), bprp, plx, stage, planets: byId[id] }));
 }
-function censusStats(dist) {
-  const bins = CENSUS.distances[dist], w = CENSUS.bin_width;
-  const N = Object.fromEntries(GAIA_CLASSES.map(c => [c, 0]));
-  for (const b in bins) N[colorClass((+b + 0.5) * w)] += bins[b];
-  const minPlx = 1000 / +dist;
-  const hosts = HOSTS.filter(h => h.plx > minPlx);
-  const out = {};
-  for (const c of GAIA_CLASSES.concat('all')) {
-    const hs = c === 'all' ? hosts : hosts.filter(h => h.cls === c);
-    const n = c === 'all' ? Object.values(N).reduce((s, v) => s + v, 0) : N[c];
-    out[c] = { N: n, hits: Object.fromEntries(CRITERIA.map(([k, , f]) => [k, hs.filter(h => f(h.planets)).length])) };
+
+// Gaia star counts N[stage][class] and matching host counts H[stage][class][criterion] within `dist`.
+function censusTable(dist) {
+  const w = CENSUS.bin_width, minPlx = minPlxOf(dist);
+  const N = {}, H = {};
+  for (const st of STAGES) {
+    N[st] = Object.fromEntries(GAIA_CLASSES.map(c => [c, 0]));
+    H[st] = Object.fromEntries(GAIA_CLASSES.map(c => [c, Object.fromEntries(CRITERIA.map(([k]) => [k, 0]))]));
+    const bins = CENSUS.distances[dist][st] || {};
+    for (const b in bins) N[st][colorClass((+b + 0.5) * w)] += bins[b];
   }
-  return out;
+  HOSTS.filter(h => h.plx > minPlx).forEach(h => {
+    for (const [k, , f] of CRITERIA) if (f(h.planets)) H[h.stage][h.cls][k]++;
+  });
+  return { N, H };
 }
+// Distance choice: a limit in pc, or "all" for every Gaia DR3 source with a good parallax.
+const minPlxOf = d => d === 'all' ? 0 : 1000 / +d;
+const distText = d => d === 'all' ? 'across the whole Milky Way (all of Gaia DR3)' : `within ${d} pc`;
+const distShort = d => d === 'all' ? 'in all of Gaia DR3' : `within ${d} pc`;
+
+const clsList = c => c === 'all' ? GAIA_CLASSES : [c];
+const nOf = (T, stages, classes) => stages.reduce((s, st) => s + classes.reduce((t, c) => t + T.N[st][c], 0), 0);
+const hOf = (T, stages, classes, k) => stages.reduce((s, st) => s + classes.reduce((t, c) => t + T.H[st][c][k], 0), 0);
 
 function renderGaia() {
-  const st = censusStats(state.qDist);
+  const T = censusTable(state.qDist);
+  const pop = POPS[state.qPop], classes = clsList(state.qClass);
   const crit = CRITERIA.find(c => c[0] === state.qCrit);
-  const s = st[state.qClass], hits = s.hits[state.qCrit];
-  const pct = s.N ? 100 * hits / s.N : null;
-  const clsName = state.qClass === 'all' ? 'all' : `${state.qClass}-type`;
-  $('q-answer').innerHTML = `<span class="big">${fmtPct(pct)}</span> ${hits.toLocaleString()} of ${s.N.toLocaleString()} ${clsName} dwarfs within ${state.qDist} pc host ${crit[1]}.`
-    + (hits < 10 ? ' <em>Small numbers: treat as indicative only.</em>' : '');
+  const N = nOf(T, pop.stages, classes), hits = hOf(T, pop.stages, classes, state.qCrit);
+  const who = `${state.qClass === 'all' ? '' : state.qClass + '-type '}${pop.label}`;
+  $('q-answer').innerHTML = N
+    ? `<span class="big">${fmtPct(100 * hits / N)}</span> ${hits.toLocaleString()} of ${N.toLocaleString()} Gaia DR3 ${who} ${distText(state.qDist)} host ${crit[1]}.`
+      + (hits < 10 ? ' <em>Small numbers: treat as indicative only.</em>' : '')
+    : `Gaia DR3 has no ${who} ${distText(state.qDist)} that pass the quality cuts.`;
+  if (state.gMode === 'bars') renderGaiaBars(T); else renderGaiaDist();
+  renderPies(T);
+  renderGaiaTable(T);
+}
 
+function renderGaiaBars(T) {
+  const yk = state.gY.bars, k = state.qCrit, d = state.qDist, stages = POPS[state.qPop].stages;
   const series = SERIES();
-  const vals = GAIA_CLASSES.map(c => st[c].N ? 100 * st[c].hits[state.qCrit] / st[c].N : 0);
-  const trace = {
-    type: 'bar', x: GAIA_CLASSES, y: vals,
-    marker: { color: GAIA_CLASSES.map(c => c === state.qClass || state.qClass === 'all' ? series[0] : css('--seq-lo')), cornerradius: 4 },
-    customdata: GAIA_CLASSES.map(c => [st[c].hits[state.qCrit], st[c].N]),
-    text: vals.map(v => fmtPct(v)), textposition: 'outside', textfont: { size: 12, color: css('--text-secondary') }, cliponaxis: false,
-    hovertemplate: '%{x} dwarfs: %{customdata[0]} of %{customdata[1]} (%{y:.3f}%)<extra></extra>',
+  const val = (st, c) => {
+    const n = T.N[st][c], h = T.H[st][c][k];
+    return yk === 'pct' ? (n ? 100 * h / n : 0) : yk === 'hosts' ? h : n;
   };
-  const layout = baseLayout({ bargap: 0.35, margin: { l: 60, r: 20, t: 24, b: 40 } });
-  layout.yaxis = { ...layout.yaxis, title: { ...layout.yaxis.title, text: `% of Gaia stars within ${state.qDist} pc` }, rangemode: 'tozero' };
+  const fmt = v => yk === 'pct' ? fmtPct(v) : v.toLocaleString();
+  const sel = c => state.qClass === 'all' || c === state.qClass;
+  const hover = st => `%{x} ${STAGE_LABEL[st].toLowerCase()}: %{customdata[0]:,} hosts of %{customdata[1]:,} stars<extra></extra>`;
+  const custom = st => GAIA_CLASSES.map(c => [T.H[st][c][k], T.N[st][c]]);
+  let traces;
+  if (stages.length === 1) {
+    const st = stages[0], y = GAIA_CLASSES.map(c => val(st, c));
+    traces = [{
+      type: 'bar', x: GAIA_CLASSES, y, customdata: custom(st), hovertemplate: hover(st),
+      marker: { color: GAIA_CLASSES.map(c => sel(c) ? series[0] : css('--seq-lo')), cornerradius: 4 },
+      text: y.map(fmt), textposition: 'outside', cliponaxis: false, textfont: { size: 12, color: css('--text-secondary') },
+    }];
+  } else {
+    // Every population at once: grouped bars for rates, stacked bars for counts.
+    traces = stages.map(st => {
+      const y = GAIA_CLASSES.map(c => val(st, c));
+      return {
+        type: 'bar', name: STAGE_LABEL[st], x: GAIA_CLASSES, y, customdata: custom(st), hovertemplate: hover(st),
+        marker: { color: css(STAGE_VAR[st]), opacity: GAIA_CLASSES.map(c => sel(c) ? 1 : 0.35),
+          line: { width: yk === 'pct' ? 0 : 1, color: css('--surface-1') } },
+        text: y.map(v => v ? fmt(v) : ''), textposition: yk === 'pct' ? 'outside' : 'inside', cliponaxis: false,
+        textfont: { size: 11 }, insidetextanchor: 'middle',
+      };
+    });
+  }
+  const layout = baseLayout({
+    bargap: 0.3, bargroupgap: 0.08, margin: { l: 70, r: 20, t: 24, b: 40 },
+    barmode: stages.length > 1 ? (yk === 'pct' ? 'group' : 'stack') : 'group', showlegend: stages.length > 1,
+  });
+  layout.legend = { ...layout.legend, y: -0.22, traceorder: 'normal' };
+  const yTitle = { pct: `% of Gaia objects ${distShort(d)}`, hosts: `Planet hosts ${distShort(d)}`, stars: `Gaia objects ${distShort(d)}` }[yk];
+  layout.yaxis = { ...layout.yaxis, title: { ...layout.yaxis.title, text: yTitle }, rangemode: 'tozero', ticksuffix: yk === 'pct' ? '%' : '' };
   layout.xaxis = { ...layout.xaxis, title: { ...layout.xaxis.title, text: 'Spectral class (from Gaia BP−RP)' }, gridcolor: 'rgba(0,0,0,0)' };
-  Plotly.react('gaia-plot', [trace], layout, PCONF);
+  Plotly.react('gaia-plot', traces, layout, PCONF);
+}
 
-  const head = ['Class', 'Gaia stars', ...CRITERIA.map(([k]) => CRIT_SHORT[k] || k.slice(5))];
+// Probability distribution over BP-RP colour: Gaia stars of the population vs. hosts meeting the criterion.
+function renderGaiaDist() {
+  const d = state.qDist, minPlx = minPlxOf(d), w = CENSUS.bin_width, pop = POPS[state.qPop], k = state.qCrit;
+  const cdf = state.gY.dist === 'cdf', step = 0.1, X_MIN = -0.6, X_MAX = 4.6;
+  const series = SERIES();
+  // Out-of-range tails fold into the end bins so the totals (and the CDF) stay whole.
+  const bin = x => Math.min(Math.max(Math.floor(x / step + 1e-9), Math.round(X_MIN / step)), Math.round(X_MAX / step) - 1);
+  const stars = {}, hosts = {};
+  for (const st of pop.stages) {
+    const bins = CENSUS.distances[d][st] || {};
+    for (const b in bins) { const j = bin((+b + 0.5) * w); stars[j] = (stars[j] || 0) + bins[b]; }
+  }
+  const f = CRITERIA.find(c => c[0] === k)[2];
+  HOSTS.filter(h => h.plx > minPlx && pop.stages.includes(h.stage) && f(h.planets))
+    .forEach(h => { const j = bin(h.bprp); hosts[j] = (hosts[j] || 0) + 1; });
+  const keys = Object.keys(stars).concat(Object.keys(hosts)).map(Number);
+  if (!keys.length) { Plotly.react('gaia-plot', [], baseLayout(), PCONF); return; }
+  const lo = Math.min(...keys), hi = Math.max(...keys);
+  const xs = [], ns = [], hs = [];
+  for (let j = lo; j <= hi; j++) { xs.push(+((j + 0.5) * step).toFixed(2)); ns.push(stars[j] || 0); hs.push(hosts[j] || 0); }
+  const norm = arr => {
+    const tot = arr.reduce((s, v) => s + v, 0); let acc = 0;
+    return arr.map(v => { acc += v; return tot ? (cdf ? acc : v) / tot : 0; });
+  };
+  const yfmt = cdf ? '%{y:.3f}' : '%{y:.4f}';
+  const traces = [{
+    type: 'scatter', mode: 'lines', name: `Gaia ${pop.label}`, x: xs, y: norm(ns), customdata: ns,
+    line: { shape: cdf ? 'linear' : 'hvh', width: 2, color: series[0] },
+    hovertemplate: `BP−RP %{x:.2f} ± 0.05<br>${cdf ? 'P(≤ x)' : 'P'} = ${yfmt}<br>%{customdata:,} stars in bin<extra>Gaia stars</extra>`,
+  }];
+  const hTot = hs.reduce((s, v) => s + v, 0);
+  if (hTot) traces.push({
+    type: 'scatter', mode: 'lines', name: `Hosts: ${critShort(k).toLowerCase()} (${hTot})`, x: xs, y: norm(hs), customdata: hs,
+    line: { shape: cdf ? 'linear' : 'hvh', width: 2, color: series[1] },
+    hovertemplate: `BP−RP %{x:.2f} ± 0.05<br>${cdf ? 'P(≤ x)' : 'P'} = ${yfmt}<br>%{customdata} hosts in bin<extra>Hosts</extra>`,
+  });
+
+  // Spectral-class boundaries, with the selected class shaded.
+  const xlo = (lo) * step, xhi = (hi + 1) * step;
+  const named = GAIA_CLASSES.filter(c => { const r = classRange(c); return r[1] > xlo && r[0] < xhi; });
+  const shapes = CLASS_EDGES.filter(e => e > xlo && e < xhi).map(e => ({
+    type: 'line', x0: e, x1: e, yref: 'paper', y0: 0, y1: 1, line: { color: css('--axis'), width: 1, dash: 'dot' },
+  }));
+  if (state.qClass !== 'all') {
+    const [a, b] = classRange(state.qClass);
+    shapes.unshift({ type: 'rect', x0: Math.max(a, xlo), x1: Math.min(b, xhi), yref: 'paper', y0: 0, y1: 1,
+      fillcolor: css('--grid'), opacity: 0.6, line: { width: 0 }, layer: 'below' });
+  }
+  const annotations = named.map(c => {
+    const [a, b] = classRange(c);
+    return { x: (Math.max(a, xlo) + Math.min(b, xhi)) / 2, y: 1.02, yref: 'paper', yanchor: 'bottom', showarrow: false,
+      text: c, font: { size: 11, color: css(c === state.qClass ? '--text-primary' : '--text-muted') } };
+  });
+  if (!hTot) annotations.push({ x: 0.5, y: 0.6, xref: 'paper', yref: 'paper', showarrow: false,
+    text: 'No hosts in this population match the criterion', font: { color: css('--text-secondary') } });
+  const layout = baseLayout({ shapes, annotations, margin: { l: 70, r: 20, t: 30, b: 40 } });
+  layout.legend = { ...layout.legend, y: -0.22 };
+  layout.xaxis = { ...layout.xaxis, range: [xlo, xhi], title: { ...layout.xaxis.title, text: 'Gaia BP−RP colour (mag): hotter ← → cooler' } };
+  layout.yaxis = { ...layout.yaxis, rangemode: 'tozero', title: { ...layout.yaxis.title, text: cdf ? 'Cumulative probability' : 'Probability per 0.1 mag bin' } };
+  Plotly.react('gaia-plot', traces, layout, PCONF);
+}
+function classRange(c) {
+  const i = GAIA_CLASSES.indexOf(c);
+  return [i === 0 ? -Infinity : CLASS_EDGES[i - 1], i === GAIA_CLASSES.length - 1 ? Infinity : CLASS_EDGES[i]];
+}
+
+function renderPies(T) {
+  const k = state.qCrit, pop = POPS[state.qPop], classes = clsList(state.qClass);
+  const series = SERIES(), stageColors = STAGES.map(st => css(STAGE_VAR[st]));
+  const clsName = state.qClass === 'all' ? 'all classes' : `${state.qClass}-type objects`;
+  $('pies-note').textContent = `Shares ${distText(state.qDist)}. "By class" pies: ${pop.label}. "By stage" pies: ${clsName}. `
+    + `Planet hosts are objects with ${CRITERIA.find(c => c[0] === k)[1]}.`;
+  const pies = [
+    ['pie-1', 'Gaia objects by class', GAIA_CLASSES, GAIA_CLASSES.map(c => nOf(T, pop.stages, [c])), series, 'percent'],
+    ['pie-2', 'Planet hosts by class', GAIA_CLASSES,
+      GAIA_CLASSES.map(c => hOf(T, pop.stages, [c], k)), series, 'percent'],
+    ['pie-3', 'Gaia objects by stage', STAGE_ORDER, STAGES.map(st => nOf(T, [st], classes)), stageColors, 'label+percent'],
+    ['pie-4', 'Planet hosts by stage', STAGE_ORDER, STAGES.map(st => hOf(T, [st], classes, k)), stageColors, 'label+percent'],
+  ];
+  for (const [id, title, labels, values, colors, textinfo] of pies) {
+    const total = values.reduce((s, v) => s + v, 0);
+    const trace = {
+      type: 'pie', labels, values, sort: false, direction: 'clockwise', hole: 0.45, textinfo,
+      texttemplate: textinfo === 'percent' ? '%{percent:.1%}' : '%{label}<br>%{percent:.1%}',
+      textposition: 'inside', insidetextorientation: 'horizontal',
+      marker: { colors, line: { color: css('--surface-1'), width: 2 } },
+      hovertemplate: '%{label}: %{value:,} (%{percent:.2%})<extra></extra>',
+    };
+    const layout = baseLayout({
+      margin: { l: 10, r: 10, t: 46, b: 10 }, showlegend: true,
+      title: { text: title, font: { size: 13 }, x: 0, xanchor: 'left', y: 0.97 },
+      annotations: [{ text: total ? total.toLocaleString() : 'None', showarrow: false, font: { size: 13, color: css('--text-secondary') } }],
+    });
+    layout.legend = { ...layout.legend, orientation: 'h', y: -0.05, x: 0.5, xanchor: 'center' };
+    Plotly.react(id, total ? [trace] : [], layout, PCONF);
+  }
+}
+
+function renderGaiaTable(T) {
+  const stages = POPS[state.qPop].stages;
+  const head = ['Class', 'Gaia objects', ...CRITERIA.map(([k]) => critShort(k))];
   const body = GAIA_CLASSES.concat('all').map(c => {
-    const r = st[c];
+    const cl = clsList(c), n = nOf(T, stages, cl);
     const cells = CRITERIA.map(([k]) => {
-      const v = r.N ? 100 * r.hits[k] / r.N : null;
-      return `<td class="${k === state.qCrit ? 'hl' : ''}" title="${r.hits[k]} of ${r.N}">${fmtPct(v)}</td>`;
+      const h = hOf(T, stages, cl, k);
+      return `<td class="${k === state.qCrit ? 'hl' : ''}" title="${h} of ${n}">${n ? fmtPct(100 * h / n) : '–'}</td>`;
     }).join('');
-    return `<tr class="${c === state.qClass ? 'sel' : ''}"><td>${c === 'all' ? 'All' : c}</td><td>${r.N.toLocaleString()}</td>${cells}</tr>`;
+    return `<tr class="${c === state.qClass ? 'sel' : ''}"><td>${c === 'all' ? 'All' : c}</td><td>${n.toLocaleString()}</td>${cells}</tr>`;
   }).join('');
-  $('gaia-table').innerHTML = `<caption class="sr-only">Share of Gaia DR3 dwarfs within ${state.qDist} pc hosting each kind of planet</caption>`
+  $('gaia-table').innerHTML = `<caption>Gaia DR3 ${POPS[state.qPop].label} ${distText(state.qDist)}: share hosting each kind of planet</caption>`
     + `<thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody>`;
 }
 
@@ -528,12 +710,17 @@ function wire() {
     syncControls(); renderMain(); saveHash();
   };
 
-  fillSelect($('q-class'), GAIA_CLASSES.map(c => [c, `${c}-type`]).concat([['all', 'all']]), state.qClass);
-  fillSelect($('q-dist'), Object.keys(CENSUS.distances).map(d => [d, `${d} pc`]), state.qDist);
+  fillSelect($('q-class'), [['all', 'all']].concat(GAIA_CLASSES.map(c => [c, `${c}-type`])), state.qClass);
+  fillSelect($('q-pop'), Object.entries(POPS).map(([k, v]) => [k, v.label]), state.qPop);
+  fillSelect($('q-dist'), Object.keys(CENSUS.distances).map(d => [d, d === 'all' ? 'across the whole Milky Way' : `within ${d} pc`]), state.qDist);
   fillSelect($('q-crit'), CRITERIA.map(([k, l]) => [k, l]), state.qCrit);
   $('q-class').onchange = e => { state.qClass = e.target.value; renderGaia(); };
+  $('q-pop').onchange = e => { state.qPop = e.target.value; renderGaia(); };
   $('q-dist').onchange = e => { state.qDist = e.target.value; renderGaia(); };
   $('q-crit').onchange = e => { state.qCrit = e.target.value; renderGaia(); };
+  $('g-mode').onchange = e => { state.gMode = e.target.value; syncGaiaY(); renderGaia(); };
+  $('g-y').onchange = e => { state.gY[state.gMode] = e.target.value; renderGaia(); };
+  syncGaiaY();
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderAll);
 }
