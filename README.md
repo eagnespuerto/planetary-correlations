@@ -1,5 +1,12 @@
 # Planetary Correlations
 
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![data refresh](https://github.com/eagnespuerto/planetary-correlations/actions/workflows/refresh-data.yml/badge.svg)](https://github.com/eagnespuerto/planetary-correlations/actions/workflows/refresh-data.yml)
+[![made with](https://img.shields.io/badge/made%20with-JavaScript-F7DF1E?logo=javascript&logoColor=white)](https://github.com/eagnespuerto/planetary-correlations)
+[![website](https://img.shields.io/badge/website-live-brightgreen)](https://eagnespuerto.github.io/planetary-correlations/)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/eagnespuerto)
+[![Linktree](https://img.shields.io/badge/Linktree-soitsagnes-43E55E?logo=linktree&logoColor=white)](https://linktr.ee/soitsagnes)
+
 A static page for exploring the confirmed exoplanets in the [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/). Pick any two attributes to plot against each other (semi-major axis, period, radius, mass, density, eccentricity, insolation, star type, star mass, metallicity, distance, number of planets, discovery method and more). The page shows the correlation, a trend line and Solar System reference points.
 
 Below the chart, the known planets are compared with the **Gaia DR3** census of stars and white dwarfs, split into main-sequence, evolved (non-main-sequence) and remnant objects. It answers questions like:
