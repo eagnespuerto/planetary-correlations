@@ -169,14 +169,33 @@ def census_key():
     return hashlib.sha1(spec.encode()).hexdigest()[:12]
 
 
+def fetch_hosts(ids):
+    """Gaia colour, parallax and CMD stage for the given Gaia DR3 source IDs."""
+    hosts = {}
+    for k in range(0, len(ids), 800):
+        chunk = ",".join(ids[k:k + 800])
+        q = (f"SELECT source_id, bp_rp, parallax, parallax_over_error, phot_g_mean_mag, phot_bp_rp_excess_factor "
+             f"FROM gaiadr3.gaia_source WHERE source_id IN ({chunk})")
+        for r in tap(GAIA_TAP, q, lang="ADQL"):
+            bp_rp, plx, poe, g, exc = (num(r[c]) for c in (
+                "bp_rp", "parallax", "parallax_over_error", "phot_g_mean_mag", "phot_bp_rp_excess_factor"))
+            stage = None
+            if None not in (bp_rp, plx, poe, g) and poe > 10 and plx > 0:
+                stage = stage_of(bp_rp, g + 5 * math.log10(plx) - 10, exc)
+            hosts[r["source_id"]] = [None if bp_rp is None else round(bp_rp, 4),
+                                     None if plx is None else round(plx, 3), stage]
+    return hosts
+
+
 def fetch_census(gaia_ids):
     key = census_key()
-    old = {}
+    old, old_hosts = {}, {}
     old_path = DATA / "census.json"
     if old_path.exists():
         prev = json.loads(old_path.read_text())
         if prev.get("census_key") == key:
             old = prev.get("distances", {})
+            old_hosts = prev.get("hosts", {})
     census = {"bin_width": 0.05, "census_key": key, "stages": list(STAGE_CUTS), "distances": {}}
     for d in DISTANCES:
         if str(d) in old:
@@ -196,20 +215,18 @@ def fetch_census(gaia_ids):
 
     # Gaia colour, parallax and CMD stage for every host with a Gaia DR3 ID (any distance).
     # Stage is null when the astrometry or colour fails the census quality cut.
-    hosts = {}
+    # Gaia DR3 is fixed, so hosts already in census.json (same cuts) are reused and only new
+    # Gaia IDs are queried. The scheduled refresh then works even when the Gaia archive is down.
     ids = sorted({i for i in gaia_ids if i})
-    for k in range(0, len(ids), 800):
-        chunk = ",".join(ids[k:k + 800])
-        q = (f"SELECT source_id, bp_rp, parallax, parallax_over_error, phot_g_mean_mag, phot_bp_rp_excess_factor "
-             f"FROM gaiadr3.gaia_source WHERE source_id IN ({chunk})")
-        for r in tap(GAIA_TAP, q, lang="ADQL"):
-            bp_rp, plx, poe, g, exc = (num(r[c]) for c in (
-                "bp_rp", "parallax", "parallax_over_error", "phot_g_mean_mag", "phot_bp_rp_excess_factor"))
-            stage = None
-            if None not in (bp_rp, plx, poe, g) and poe > 10 and plx > 0:
-                stage = stage_of(bp_rp, g + 5 * math.log10(plx) - 10, exc)
-            hosts[r["source_id"]] = [None if bp_rp is None else round(bp_rp, 4),
-                                     None if plx is None else round(plx, 3), stage]
+    hosts = {i: old_hosts[i] for i in ids if i in old_hosts}
+    new_ids = [i for i in ids if i not in hosts]
+    print(f"gaia hosts: {len(hosts)} reused, {len(new_ids)} to query")
+    try:
+        hosts.update(fetch_hosts(new_ids))
+    except (urllib.error.URLError, OSError) as e:
+        # Gaia unreachable: keep the cached hosts and refresh the planets anyway. The missed
+        # hosts are still "new" next run, so they are filled in once the archive is back.
+        print(f"WARNING: Gaia archive unreachable ({e}); {len(new_ids)} new hosts missed in the census.")
     print(f"gaia hosts: {len(hosts)}; by stage: "
           + ", ".join(f"{s}={sum(1 for h in hosts.values() if h[2] == s)}" for s in [*STAGE_CUTS, None]))
     census["hosts"] = hosts
