@@ -34,6 +34,11 @@ PLANET_COLS = [
     "st_spectype", "st_teff", "st_rad", "st_mass", "st_met", "st_logg", "st_age", "sy_dist",
 ]
 
+# pscomppars fills a missing radius from mass (or mass from radius) with the Chen & Kipping
+# (2017) mass-radius relation and cites it as "Calculated Value". These columns keep a 0/1 flag
+# per planet instead of the reference HTML, so the page can hide model values.
+CALC_FLAGS = {"pl_rade_calc": "pl_rade_reflink", "pl_bmasse_calc": "pl_bmasse_reflink"}
+
 # Distance limits (pc) for the Gaia census. Parallax limit = 1000 / d. "all" has no distance
 # limit: every Gaia DR3 source with a good parallax, which is as close to "the whole Milky Way"
 # as Gaia gets (a few kpc for most stars, ~0.1% of the Galaxy's stars).
@@ -141,9 +146,9 @@ def num(v):
 
 
 def fetch_planets():
-    rows = tap(NASA_TAP, f"select {','.join(PLANET_COLS)} from pscomppars")
+    rows = tap(NASA_TAP, f"select {','.join(PLANET_COLS + list(CALC_FLAGS.values()))} from pscomppars")
     print(f"planets: {len(rows)}")
-    cols = {c: [] for c in PLANET_COLS}
+    cols = {c: [] for c in PLANET_COLS + list(CALC_FLAGS)}
     text_cols = {"pl_name", "hostname", "discoverymethod", "st_spectype", "gaia_dr3_id"}
     for r in rows:
         for c in PLANET_COLS:
@@ -159,6 +164,10 @@ def fetch_planets():
                 elif v is not None:
                     v = float(f"{v:.5g}")
             cols[c].append(v)
+        for flag, ref in CALC_FLAGS.items():
+            cols[flag].append(int("CALCULATED_VALUE" in (r[ref] or "")))
+    for flag in CALC_FLAGS:
+        print(f"{flag}: {sum(cols[flag])} planets")
     return cols
 
 

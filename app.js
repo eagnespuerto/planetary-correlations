@@ -122,7 +122,7 @@ let PLANETS = [];
 let CENSUS = null;
 const state = {
   x: 'pl_bmasse', y: 'pl_rade', color: 'planet_type', xlog: true, ylog: true,
-  classes: new Set(CLASS_ORDER.concat(['Unknown'])), trend: true, solar: true, rownorm: true,
+  classes: new Set(CLASS_ORDER.concat(['Unknown'])), trend: true, solar: true, rownorm: true, measured: true,
   qClass: 'G', qPop: 'ms', qDist: '100', qCrit: 'any',
   gMode: 'bars', gY: { bars: 'pct', dist: 'prob' },
 };
@@ -180,7 +180,22 @@ const PCONF = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['
 
 // ---------- main explorer ----------
 function filtered() {
-  return PLANETS.filter(r => state.classes.has(r.star_class || 'Unknown'));
+  return PLANETS.filter(r => state.classes.has(r.star_class || 'Unknown')
+    && !(state.measured && usesModelValue(r)));
+}
+
+// Attributes that come from the planet's radius or mass. pscomppars fills a missing one from the
+// other with the Chen & Kipping (2017) relation; pl_rade_calc / pl_bmasse_calc flag those rows.
+const FROM_RADIUS = ['pl_rade', 'planet_type'];
+const FROM_MASS = ['pl_bmasse'];
+const FROM_BOTH = ['pl_dens'];
+
+// True when this row would put a model (calculated) radius or mass on the current chart.
+function usesModelValue(r) {
+  const shown = [state.x, state.y, state.color];
+  const usesR = shown.some(k => FROM_RADIUS.includes(k) || FROM_BOTH.includes(k));
+  const usesM = shown.some(k => FROM_MASS.includes(k) || FROM_BOTH.includes(k));
+  return (usesR && r.pl_rade_calc === 1) || (usesM && r.pl_bmasse_calc === 1);
 }
 function catOrder(key, rows) {
   const ord = ATTRS[key].order;
@@ -659,6 +674,7 @@ function syncControls() {
   fillSelect($('y'), attrOpts, state.y);
   fillSelect($('color'), [['none', 'Nothing']].concat(attrOpts.filter(([k]) => k !== state.x && k !== state.y)), state.color);
   $('xlog').checked = state.xlog; $('ylog').checked = state.ylog;
+  $('measured').checked = state.measured;
 }
 function setAxis(axis, key) {
   state[axis] = key;
@@ -667,7 +683,7 @@ function setAxis(axis, key) {
   syncControls(); renderMain(); saveHash();
 }
 function saveHash() {
-  const h = new URLSearchParams({ x: state.x, y: state.y, c: state.color, xl: +state.xlog, yl: +state.ylog });
+  const h = new URLSearchParams({ x: state.x, y: state.y, c: state.color, xl: +state.xlog, yl: +state.ylog, m: +state.measured });
   history.replaceState(null, '', '#' + h);
 }
 function readHash() {
@@ -677,6 +693,7 @@ function readHash() {
   if (h.get('c') && (h.get('c') === 'none' || ATTRS[h.get('c')])) state.color = h.get('c');
   if (h.has('xl')) state.xlog = h.get('xl') === '1';
   if (h.has('yl')) state.ylog = h.get('yl') === '1';
+  if (h.has('m')) state.measured = h.get('m') === '1';
 }
 
 function wire() {
@@ -687,6 +704,7 @@ function wire() {
   $('ylog').onchange = e => { state.ylog = e.target.checked; renderMain(); saveHash(); };
   $('trend').onchange = e => { state.trend = e.target.checked; renderMain(); };
   $('solar').onchange = e => { state.solar = e.target.checked; renderMain(); };
+  $('measured').onchange = e => { state.measured = e.target.checked; renderMain(); saveHash(); };
   $('rownorm').onchange = e => { state.rownorm = e.target.checked; renderMain(); };
   $('swap').onclick = () => {
     [state.x, state.y, state.xlog, state.ylog] = [state.y, state.x, state.ylog, state.xlog];
